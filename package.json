@@ -1,0 +1,10 @@
+{
+  "name": "asset-close",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "资产收盘：iPhone 主屏幕资产记录 PWA",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
