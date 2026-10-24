@@ -15,7 +15,7 @@ import {
   addDays,
   daysBetween,
   monthOf,
-  addMonths
+  moneyClass
 } from '../js/utils.js';
 
 test('金额输入解析：普通、千分位、全角、负数、小数', () => {
@@ -81,11 +81,16 @@ test('日期加减与天数', () => {
   assert.equal(addDays('2026-12-31', 1), '2027-01-01');
   assert.equal(daysBetween('2026-10-16', '2026-10-19'), 3);
   assert.equal(monthOf('2026-10-19'), '2026-10');
-  assert.equal(addMonths('2026-01', -1), '2025-12');
 });
 
 test('中文日期显示', () => {
   assert.equal(formatDateCN('2026-10-19'), '10月19日');
   assert.equal(formatDateFull('2026-10-19'), '2026年10月19日');
   assert.equal(weekdayCN('2026-10-19'), '周一');
+});
+
+test('涨跌颜色类（红涨绿跌）', () => {
+  assert.equal(moneyClass(1), 'money-up');
+  assert.equal(moneyClass(-1), 'money-down');
+  assert.equal(moneyClass(0), 'money-flat');
 });

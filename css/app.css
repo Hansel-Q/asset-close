@@ -16,6 +16,8 @@
   --accent-soft: #e8efff;
   --gain: #0a7d4f;
   --loss: #d93025;
+  --price-up: #d93025;
+  --price-down: #0a7d4f;
   --warning-bg: #fff7ed;
   --warning-text: #9a3412;
   --warning-line: #fed7aa;
@@ -43,6 +45,8 @@
     --accent-soft: #17243a;
     --gain: #4ade80;
     --loss: #ff7b72;
+    --price-up: #ff7b72;
+    --price-down: #4ade80;
     --warning-bg: #2a1f12;
     --warning-text: #fdba74;
     --warning-line: #4a3218;
@@ -68,6 +72,8 @@
   --accent-soft: #17243a;
   --gain: #4ade80;
   --loss: #ff7b72;
+  --price-up: #ff7b72;
+  --price-down: #4ade80;
   --warning-bg: #2a1f12;
   --warning-text: #fdba74;
   --warning-line: #4a3218;
@@ -243,10 +249,15 @@ a {
 }
 
 .money-up {
-  color: var(--gain);
+  color: var(--price-up);
 }
 
 .money-down {
+  color: var(--price-down);
+}
+
+/* 负债/负数余额不是“下跌收益”，保持红色警示。 */
+.money-debt {
   color: var(--loss);
 }
 
@@ -369,15 +380,6 @@ a {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
-}
-
-.profit-flows {
-  padding-top: 10px;
-  border-top: 1px dashed var(--line);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.7;
-  font-variant-numeric: tabular-nums;
 }
 
 .profit-empty {
@@ -652,6 +654,14 @@ a {
   width: 100%;
   height: auto;
   display: block;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.chart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 .chart-grid {
@@ -663,6 +673,74 @@ a {
   fill: var(--muted);
   font-size: 9px;
   font-family: inherit;
+}
+
+.chart-hit {
+  pointer-events: all;
+}
+
+.chart-point {
+  fill: var(--accent);
+  opacity: 0.55;
+}
+
+.chart-point--selected {
+  fill: var(--accent);
+  opacity: 1;
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+.chart-guide {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+}
+
+.chart-hint {
+  margin-top: 2px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chart-detail {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.chart-detail__date {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-detail__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.chart-detail__row span {
+  color: var(--muted);
+}
+
+.chart-detail__row strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-detail__meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-empty {
@@ -783,6 +861,18 @@ a {
   font-size: 12px;
 }
 
+.list-row__value span.money-up {
+  color: var(--price-up);
+}
+
+.list-row__value span.money-down {
+  color: var(--price-down);
+}
+
+.list-row__value span.money-debt {
+  color: var(--loss);
+}
+
 .month-head {
   display: flex;
   justify-content: space-between;
@@ -795,19 +885,6 @@ a {
 
 .month-head:first-child {
   padding-top: 0;
-}
-
-.month-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.month-nav__label {
-  font-size: 17px;
-  font-weight: 750;
-  letter-spacing: -0.01em;
 }
 
 /* ---------- 摘要卡 ---------- */
@@ -843,6 +920,14 @@ a {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.summary-card__sub.money-up {
+  color: var(--price-up);
+}
+
+.summary-card__sub.money-down {
+  color: var(--price-down);
 }
 
 /* ---------- 账户/输入 ---------- */
@@ -963,17 +1048,6 @@ a {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
-}
-
-.delta-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
 }
 
 .input,
@@ -1144,7 +1218,7 @@ a {
   max-width: 720px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
 }
 

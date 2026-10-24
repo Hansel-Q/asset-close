@@ -2,10 +2,12 @@
  * 应用入口：路由、主题、底部导航、Service Worker、跨天检测。
  */
 
-import { createStore } from './store.js';
+import { createStore, readAutoBackups, STORAGE_KEY } from './store.js';
 import {
+  confirmDialog,
   downloadText,
   escapeHtml,
+  formatDateTime,
   isIOS,
   isStandalone,
   toast,
@@ -14,14 +16,12 @@ import {
 
 import * as homeView from './views/home.js';
 import * as recordView from './views/record.js';
-import * as incomeView from './views/income.js';
 import * as historyView from './views/history.js';
 import * as settingsView from './views/settings.js';
 
 const routes = {
   home: homeView,
   record: recordView,
-  income: incomeView,
   history: historyView,
   settings: settingsView
 };
@@ -122,6 +122,25 @@ function renderLoadError(result) {
   if (tabbar) tabbar.hidden = true;
   app.hidden = false;
 
+  const backups = readAutoBackups();
+
+  const backupHtml = backups.length
+    ? `
+      <div class="section" style="margin-top:18px">
+        <h2 class="section-title">从自动备份恢复</h2>
+        <div class="list">
+          ${backups.slice(0, 3).map((entry, index) => `
+            <div class="list-row list-row--static">
+              <span class="list-row__main">
+                <span class="list-row__title">${escapeHtml(formatDateTime(entry.at))}</span>
+                <span class="list-row__meta">${entry.data.snapshots.length} 条每日记录</span>
+              </span>
+              <button type="button" class="btn btn--ghost btn--small" data-restore-backup="${index}">恢复</button>
+            </div>`).join('')}
+        </div>
+      </div>`
+    : '';
+
   app.innerHTML = `
     <div class="card error-card">
       <h1>数据读取失败</h1>
@@ -130,13 +149,36 @@ function renderLoadError(result) {
         ${result.raw ? '<button class="btn btn--primary btn--block" data-export>先导出原始数据</button>' : ''}
         <button class="btn btn--ghost btn--block" data-reload>重新加载</button>
       </div>
-      <p class="tiny" style="margin-top:14px">不要清理浏览器数据。先导出原始内容，再处理问题。</p>
+      <p class="tiny" style="margin-top:14px">不要清理浏览器数据。可以先导出原始内容，或从自动备份恢复。</p>
+      ${backupHtml}
     </div>`;
 
   app.querySelector('[data-export]')?.addEventListener('click', () => {
     downloadText(`资产收盘-原始数据-${todayStr()}.json`, result.raw || '');
   });
   app.querySelector('[data-reload]')?.addEventListener('click', () => location.reload());
+
+  app.querySelectorAll('[data-restore-backup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const entry = backups[Number(button.dataset.restoreBackup)];
+      if (!entry) return;
+
+      confirmDialog({
+        title: '恢复自动备份？',
+        message: `将把 ${formatDateTime(entry.at)} 的自动备份写回本机（${entry.data.snapshots.length} 条每日记录）。当前损坏的原始数据会被覆盖。`,
+        confirmText: '恢复',
+        danger: true
+      }).then((ok) => {
+        if (!ok) return;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(entry.data));
+          location.reload();
+        } catch (error) {
+          toast(`恢复失败：${error.message}`, 'error');
+        }
+      });
+    });
+  });
 }
 
 function addSafariBanner() {
@@ -249,6 +291,13 @@ function init() {
   }
 
   render();
+
+  if (loadResult.migrated) {
+    toast('数据已升级到 v1.1，收入功能已移除', 'info');
+  }
+  if (loadResult.migrationWarning) {
+    toast(loadResult.migrationWarning, 'warning');
+  }
 
   window.addEventListener('hashchange', () => render());
 

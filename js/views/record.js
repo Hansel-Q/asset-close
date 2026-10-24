@@ -5,6 +5,7 @@ import {
   snapshotBreakdown
 } from '../calc.js';
 import { nowIso } from '../store.js';
+import { autoShareAfterSave } from '../backup.js';
 import {
   centsToInput,
   confirmDialog,
@@ -20,12 +21,10 @@ import {
   weekdayCN
 } from '../utils.js';
 
-let mode = null;
 let draft = null;
 let dirty = false;
 
 export function resetDraft() {
-  mode = null;
   draft = null;
   dirty = false;
 }
@@ -50,7 +49,6 @@ function initDraft(data, date) {
   const existing = snapshotAt(data, date);
   const previous = previousSnapshot(data, date);
   const balances = {};
-  const deltas = {};
 
   for (const account of accountsOf(data)) {
     let cents = null;
@@ -60,63 +58,22 @@ function initDraft(data, date) {
       cents = previous.balances[account.id];
     }
     balances[account.id] = cents;
-
-    const baseline = previous?.balances?.[account.id];
-    if (baseline != null && cents != null) {
-      const change = cents - baseline;
-      deltas[account.id] = change === 0 ? '' : centsToInput(change);
-    } else {
-      deltas[account.id] = '';
-    }
   }
 
-  return { date, balances, deltas, note: existing?.note || '' };
+  return { date, balances, note: existing?.note || '' };
 }
 
 function accountRow(data, account, previous, draftState) {
   const baseline = previous?.balances?.[account.id] ?? null;
   const cents = draftState.balances[account.id];
   const isLiability = account.type === 'liability';
-  const useDelta = mode === 'delta' && baseline != null;
-  const allowSign = useDelta || account.type === 'asset';
+  const allowSign = account.type === 'asset';
   const idAttr = escapeHtml(account.id);
+  const value = centsToInput(cents);
 
-  let hint;
-  if (isLiability) {
-    hint = baseline != null ? `欠款填正数 · 上期 ${formatMoney(baseline)}` : '欠款填正数';
-  } else {
-    hint = baseline != null ? `上期 ${formatMoney(baseline)}` : '首次记录';
-  }
-
-  let inputHtml;
-  if (useDelta) {
-    const rawDelta = draftState.deltas[account.id] ?? '';
-    inputHtml = `
-      <div class="amount-field has-sign">
-        <span class="amount-prefix">¥</span>
-        <input class="input" type="text" inputmode="decimal" autocomplete="off"
-          data-role="delta" data-account="${idAttr}"
-          value="${escapeHtml(rawDelta)}" placeholder="0"
-          aria-label="${escapeHtml(account.name)}今日变化">
-        <button type="button" class="sign-toggle" data-sign="${idAttr}" aria-label="切换正负号">±</button>
-      </div>
-      <div class="delta-meta">
-        <span>${isLiability ? '欠款' : '余额'} ${formatMoney(baseline)} → <strong data-new-balance="${idAttr}">${cents == null ? '—' : formatMoney(cents)}</strong></span>
-        <span>${isLiability ? '欠款增加填正数，减少填负数' : '增加填正数，减少填负数'}</span>
-      </div>`;
-  } else {
-    const value = centsToInput(cents);
-    inputHtml = `
-      <div class="amount-field ${allowSign ? 'has-sign' : ''}">
-        <span class="amount-prefix">¥</span>
-        <input class="input" type="text" inputmode="decimal" autocomplete="off"
-          data-role="balance" data-account="${idAttr}"
-          value="${escapeHtml(value)}" placeholder="0.00"
-          aria-label="${escapeHtml(account.name)}${mode === 'delta' ? '首次余额' : '余额'}">
-        ${allowSign ? `<button type="button" class="sign-toggle" data-sign="${idAttr}" aria-label="切换正负号">±</button>` : ''}
-      </div>
-      <div class="account-row__hint">${mode === 'delta' ? '首次余额，请直接填写' : hint}</div>`;
-  }
+  const hint = isLiability
+    ? (baseline != null ? `欠款填正数 · 上期 ${formatMoney(baseline)}` : '欠款填正数')
+    : (baseline != null ? `上期 ${formatMoney(baseline)}` : '首次记录');
 
   return `
     <div class="account-row" data-account-row="${idAttr}">
@@ -127,7 +84,15 @@ function accountRow(data, account, previous, draftState) {
           ${isLiability ? '<span class="badge badge--liability">负债</span>' : ''}
         </div>
       </div>
-      ${inputHtml}
+      <div class="amount-field ${allowSign ? 'has-sign' : ''}">
+        <span class="amount-prefix">¥</span>
+        <input class="input" type="text" inputmode="decimal" autocomplete="off"
+          data-role="balance" data-account="${idAttr}"
+          value="${escapeHtml(value)}" placeholder="0.00"
+          aria-label="${escapeHtml(account.name)}余额">
+        ${allowSign ? `<button type="button" class="sign-toggle" data-sign="${idAttr}" aria-label="切换正负号">±</button>` : ''}
+      </div>
+      <div class="account-row__hint">${hint}</div>
     </div>`;
 }
 
@@ -141,12 +106,6 @@ function updateTotals(container, ctx) {
   if (breakdownEl) {
     breakdownEl.textContent = `资产 ${formatMoney(totals.assets)} · 负债 ${formatMoney(totals.liabilities)}`;
   }
-
-  container.querySelectorAll('[data-new-balance]').forEach((el) => {
-    const accountId = el.dataset.newBalance;
-    const cents = draft.balances[accountId];
-    el.textContent = cents == null ? '—' : formatMoney(cents);
-  });
 
   container.querySelectorAll('.sign-toggle').forEach((button) => {
     const row = button.closest('.account-row');
@@ -188,12 +147,7 @@ export function render(container, ctx) {
   if (!draft || draft.date !== selectedDate) {
     draft = initDraft(data, selectedDate);
     dirty = false;
-    if (mode === null) {
-      mode = data.settings.defaultEntryMode === 'delta' ? 'delta' : 'balance';
-    }
   }
-  if (!previous) mode = 'balance';
-  if (mode !== 'delta') mode = 'balance';
 
   const assetAccounts = accounts.filter((account) => account.type === 'asset');
   const liabilityAccounts = accounts.filter((account) => account.type === 'liability');
@@ -218,24 +172,16 @@ export function render(container, ctx) {
           <span class="label">日期</span>
           <input class="input" type="date" id="record-date" max="${today}" value="${selectedDate}">
         </label>
-
-        <div class="segmented" role="group" aria-label="录入方式">
-          <button type="button" data-entry-mode="balance" class="${mode === 'balance' ? 'is-active' : ''}">填余额</button>
-          <button type="button" data-entry-mode="delta" class="${mode === 'delta' ? 'is-active' : ''}" ${previous ? '' : 'disabled'}>填增减</button>
-        </div>
-        ${
-          previous
-            ? `<p class="help">${mode === 'delta'
-                ? '只填今天比上次增加或减少了多少，应用会自动算出新余额。减少请用 ± 按钮切换成负数。'
-                : '已自动带入上次余额，只改有变化的数字。没有的账户填 0。'}</p>`
-            : '<p class="help">第一次记录需要先填余额，作为以后计算收益的基准。“填增减”要等有上期记录后才能用。</p>'
-        }
+        <p class="help">
+          已自动带入上次余额。点一下数字会自动清空，直接输入新余额；
+          不点或没改就保留上次。第一次记录需要填写所有账户余额（没有就填 0）。
+        </p>
       </section>
 
       <section class="card">
         <div class="section-head" style="margin-bottom:4px">
-          <h2 class="section-title">账户${mode === 'delta' ? '变化' : '余额'}</h2>
-          <span class="tiny">${mode === 'delta' ? '正数=增加，负数=减少' : '单位：元'}</span>
+          <h2 class="section-title">账户余额</h2>
+          <span class="tiny">点数字自动清空</span>
         </div>
         ${assetRows}
         ${
@@ -243,16 +189,6 @@ export function render(container, ctx) {
             ? `<div class="account-section__title"><span>负债（欠款）</span><span>会从总资产中扣除</span></div>${liabilityRows}`
             : ''
         }
-      </section>
-
-      <section class="card card--tight">
-        <div class="row row--between row--wrap">
-          <div>
-            <strong>今天有外部转入/转出？</strong>
-            <p class="tiny" style="margin:4px 0 0">比如家人转入、借钱给别人。账户之间互转不用记。</p>
-          </div>
-          <button type="button" class="btn btn--ghost btn--small" data-go-income>去记一笔</button>
-        </div>
       </section>
 
       <section class="card">
@@ -278,46 +214,35 @@ export function render(container, ctx) {
 
   updateTotals(container, ctx);
 
-  container.querySelectorAll('[data-entry-mode]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const next = button.dataset.entryMode;
-      if (next === 'delta' && !previous) return;
-      if (next === mode) return;
-
-      if (next === 'delta') {
-        for (const account of accounts) {
-          const baseline = previous?.balances?.[account.id];
-          if (baseline == null) continue;
-          const cents = draft.balances[account.id];
-          const change = cents == null ? null : cents - baseline;
-          draft.deltas[account.id] = change == null || change === 0 ? '' : centsToInput(change);
-        }
-      }
-
-      mode = next;
-      ctx.rerender();
-    });
-  });
+  const focusState = new WeakMap();
 
   container.querySelectorAll('[data-role="balance"]').forEach((input) => {
+    const accountId = input.dataset.account;
+
+    input.addEventListener('focus', () => {
+      const original = draft.balances[accountId];
+      if (original == null) return;
+      focusState.set(input, { original, edited: false });
+      input.value = '';
+      input.placeholder = '输入新余额';
+    });
+
     input.addEventListener('input', () => {
-      const accountId = input.dataset.account;
+      const state = focusState.get(input);
+      if (state) state.edited = true;
       draft.balances[accountId] = parseYuanToCents(input.value);
       dirty = true;
       updateTotals(container, ctx);
     });
-  });
 
-  container.querySelectorAll('[data-role="delta"]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const accountId = input.dataset.account;
-      const baseline = previous?.balances?.[accountId];
-      if (baseline == null) return;
-      draft.deltas[accountId] = input.value;
-      const change = parseYuanToCents(input.value);
-      draft.balances[accountId] = baseline + (change ?? 0);
-      dirty = true;
-      updateTotals(container, ctx);
+    input.addEventListener('blur', () => {
+      const state = focusState.get(input);
+      if (!state) return;
+      if (!state.edited && input.value.trim() === '') {
+        input.value = centsToInput(state.original);
+      }
+      input.placeholder = '0.00';
+      focusState.delete(input);
     });
   });
 
@@ -372,55 +297,13 @@ export function render(container, ctx) {
     ctx.navigate(`#/record/${value}`);
   });
 
-  async function save() {
-    const invalidDelta = accounts.find((account) => {
-      if (mode !== 'delta' || previous?.balances?.[account.id] == null) return false;
-      const input = container.querySelector(`[data-role="delta"][data-account="${account.id}"]`);
-      const raw = input?.value.trim() || '';
-      return raw !== '' && parseYuanToCents(raw) == null;
-    });
-    if (invalidDelta) {
-      toast('有金额格式不正确，请检查后重试', 'error');
-      container.querySelector(`[data-role="delta"][data-account="${invalidDelta.id}"]`)?.focus();
-      return;
-    }
+  let committed = false;
+  let saving = false;
 
-    const missing = accounts.find((account) => draft.balances[account.id] == null);
-    if (missing) {
-      toast(`请填写「${missing.name}」的余额，没有就填 0`, 'error');
-      container.querySelector(`input[data-account="${missing.id}"]`)?.focus();
-      return;
-    }
-
-    const negativeLiability = accounts.find((account) => (
-      account.type === 'liability' && draft.balances[account.id] < 0
-    ));
-    if (negativeLiability) {
-      toast('负债余额不能是负数，请填写欠款金额（正数）', 'error');
-      return;
-    }
-
-    const negativeAssets = accounts.filter((account) => (
-      account.type === 'asset' && draft.balances[account.id] < 0
-    ));
-    if (negativeAssets.length) {
-      const ok = await confirmDialog({
-        title: '确认负数余额？',
-        message: `${negativeAssets.map((account) => account.name).join('、')} 的余额是负数。确认保存吗？`,
-        confirmText: '确认保存',
-        danger: true
-      });
-      if (!ok) return;
-    }
-
-    if (existing) {
-      const ok = await confirmDialog({
-        title: '覆盖这一天的记录？',
-        message: `${formatDateFull(selectedDate)} 已经有记录，保存会用当前数字覆盖原来的余额。`,
-        confirmText: '覆盖保存'
-      });
-      if (!ok) return;
-    }
+  function commit() {
+    if (committed) return;
+    committed = true;
+    saving = true;
 
     const nextBalances = { ...(existing?.balances || {}) };
     for (const account of accounts) {
@@ -443,16 +326,91 @@ export function render(container, ctx) {
 
     const result = ctx.store.set(data);
     if (!result.ok) {
+      committed = false;
+      saving = false;
       toast(result.error, 'error');
       return;
     }
 
+    const breakdown = snapshotBreakdown(snapshot, data.accounts);
     draft = null;
     dirty = false;
 
-    const breakdown = snapshotBreakdown(snapshot, data.accounts);
+    // 必须在保存/确认按钮的同步调用栈里触发分享。
+    // autoShareAfterSave 会在任何 await 之前同步调用 navigator.share()。
+    autoShareAfterSave(data, ctx);
+
     toast(`已保存 · 总资产 ${formatMoney(breakdown.net)}`, 'success');
     ctx.navigate('#/home');
+  }
+
+  function confirmOverwrite() {
+    confirmDialog({
+      title: '覆盖这一天的记录？',
+      message: `${formatDateFull(selectedDate)} 已经有记录，保存会用当前数字覆盖原来的余额。`,
+      confirmText: '覆盖保存',
+      onConfirm: commit
+    });
+  }
+
+  function save() {
+    if (saving || committed) return;
+
+    // 1. 输入框里有内容但格式不合法（例如多个小数点）。
+    const invalidInput = accounts.find((account) => {
+      const input = container.querySelector(`[data-role="balance"][data-account="${account.id}"]`);
+      const raw = input?.value.trim() || '';
+      return raw !== '' && parseYuanToCents(raw) == null;
+    });
+    if (invalidInput) {
+      toast('有金额格式不正确，请检查后重试', 'error');
+      container.querySelector(`[data-role="balance"][data-account="${invalidInput.id}"]`)?.focus();
+      return;
+    }
+
+    // 2. 必填（未点击或者点击了没改的字段，draft 仍是上次值）。
+    const missing = accounts.find((account) => draft.balances[account.id] == null);
+    if (missing) {
+      toast(`请填写「${missing.name}」的余额，没有就填 0`, 'error');
+      container.querySelector(`input[data-account="${missing.id}"]`)?.focus();
+      return;
+    }
+
+    // 3. 负债必须是欠款正数。
+    const negativeLiability = accounts.find((account) => (
+      account.type === 'liability' && draft.balances[account.id] < 0
+    ));
+    if (negativeLiability) {
+      toast('负债余额不能是负数，请填写欠款金额（正数）', 'error');
+      return;
+    }
+
+    // 4. 负数资产需要确认；确认按钮的 onConfirm 直接进入下一步，
+    //    保持同一用户激活链，供自动分享使用。
+    const negativeAssets = accounts.filter((account) => (
+      account.type === 'asset' && draft.balances[account.id] < 0
+    ));
+
+    if (negativeAssets.length) {
+      confirmDialog({
+        title: '确认负数余额？',
+        message: `${negativeAssets.map((account) => account.name).join('、')} 的余额是负数。确认保存吗？`,
+        confirmText: '确认保存',
+        danger: true,
+        onConfirm: () => {
+          if (existing) confirmOverwrite();
+          else commit();
+        }
+      });
+      return;
+    }
+
+    if (existing) {
+      confirmOverwrite();
+      return;
+    }
+
+    commit();
   }
 
   container.querySelector('[data-save]')?.addEventListener('click', save);
@@ -460,7 +418,7 @@ export function render(container, ctx) {
   container.querySelector('[data-delete]')?.addEventListener('click', async () => {
     const ok = await confirmDialog({
       title: '删除这一天的记录？',
-      message: '只会删除这一天的余额记录，收入记录不会删除。删除后收益会按剩下的记录重新计算。',
+      message: '只会删除这一天的余额记录。删除后收益会按剩下的记录重新计算。',
       confirmText: '删除',
       danger: true
     });
@@ -478,6 +436,4 @@ export function render(container, ctx) {
     toast('已删除这一天的记录', 'success');
     ctx.navigate('#/history');
   });
-
-  container.querySelector('[data-go-income]')?.addEventListener('click', () => ctx.navigate('#/income'));
 }

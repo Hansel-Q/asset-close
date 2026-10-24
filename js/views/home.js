@@ -1,4 +1,5 @@
 import {
+  buildChartPoints,
   calculatePeriod,
   currentView,
   snapshotBreakdown,
@@ -11,18 +12,13 @@ import {
   formatMoney,
   formatRate,
   formatSignedMoney,
+  moneyClass,
   weekdayCN
 } from '../utils.js';
 import { renderLineChart } from '../chart.js';
 
 const TWO_WEEKS = 14 * 86400000;
 const REMIND_LATER = 3 * 86400000;
-
-function moneyClass(value) {
-  if (value > 0) return 'money-up';
-  if (value < 0) return 'money-down';
-  return 'money-flat';
-}
 
 function shouldShowBackupBanner(data) {
   if (!data.snapshots.length) return false;
@@ -49,7 +45,7 @@ function renderWelcome(container, ctx) {
       <section class="card welcome">
         <div class="welcome__mark">¥</div>
         <h1>资产收盘</h1>
-        <p>每天记一次各账户余额，自动算总资产、日收益和收益率。</p>
+        <p>每天记一次各账户余额，自动算总资产、收益和收益率。</p>
         <ol class="steps">
           <li>确认账户（支付宝、微信、银行卡、同花顺证券、现金）</li>
           <li>填入今天的余额，建立第一条基准记录</li>
@@ -63,7 +59,7 @@ function renderWelcome(container, ctx) {
           }
           <button type="button" class="btn btn--ghost btn--block" data-go-settings>管理账户</button>
         </div>
-        <p class="tiny" style="margin-top:16px">数据只保存在这台设备上，不会上传到任何服务器。<br>建议每周导出一次备份。</p>
+        <p class="tiny" style="margin-top:16px">数据只保存在这台设备上，不会上传到任何服务器。<br>每天保存后会自动留一份本机备份，也可以导出到“文件”/iCloud Drive。</p>
       </section>
     </div>`;
 
@@ -83,12 +79,11 @@ export function render(container, ctx) {
   }
 
   const { latest, period, isTodayRecorded, daysSinceLatest } = view;
-  const mode = data.settings.returnMode === 'raw' ? 'raw' : 'adjusted';
   const breakdown = snapshotBreakdown(latest, data.accounts);
 
   const hasPrevious = Boolean(period?.hasPrevious);
-  const delta = hasPrevious ? (mode === 'adjusted' ? period.adjustedDelta : period.rawDelta) : null;
-  const rate = hasPrevious ? (mode === 'adjusted' ? period.adjustedRate : period.rawRate) : null;
+  const delta = hasPrevious ? period.rawDelta : null;
+  const rate = hasPrevious ? period.rawRate : null;
   const isMultiDay = hasPrevious && period.days > 1;
   const deltaClass = hasPrevious ? moneyClass(delta) : 'money-flat';
 
@@ -104,25 +99,9 @@ export function render(container, ctx) {
       </div>
       <div class="profit-empty">
         <p class="profit-empty__title">第一条记录已保存</p>
-        <p class="profit-meta">明天再记录一次，就能看到${mode === 'adjusted' ? '剔除外部收入后的' : ''}收益和收益率。</p>
+        <p class="profit-meta">明天再记录一次，就能看到收益和收益率。</p>
       </div>`;
   } else {
-    let flowHtml = '';
-    if (mode === 'adjusted' && period.flows) {
-      const { incomeIn, externalIn, externalOut, ignored } = period.flows;
-      if (incomeIn || externalIn || externalOut) {
-        const parts = [];
-        if (incomeIn) parts.push(`工资等收入 ${formatMoney(incomeIn)}`);
-        if (externalIn) parts.push(`外部转入 ${formatMoney(externalIn)}`);
-        if (externalOut) parts.push(`外部转出 ${formatMoney(externalOut)}`);
-        flowHtml = `<div class="profit-flows">剔除口径已扣掉：${parts.join('、')}${
-          ignored ? `；另有 ${formatMoney(ignored)} 标注为未计入资产，不影响收益` : ''
-        }</div>`;
-      } else {
-        flowHtml = '<div class="profit-flows">本期没有外部资金流入/流出，两种口径相同。</div>';
-      }
-    }
-
     profitHtml = `
       <div class="profit-head">
         <span class="profit-label">${isMultiDay ? `区间收益（${period.days} 天）` : '日收益'}</span>
@@ -136,11 +115,10 @@ export function render(container, ctx) {
           : ''
         }
         ${isMultiDay
-          ? `<br>日均约 ${formatSignedMoney(mode === 'adjusted' ? period.dailyAvgAdjusted : period.dailyAvgRaw)} / 天（简单平均，不是复利）`
+          ? `<br>日均约 ${formatSignedMoney(period.dailyAvgRaw)} / 天（简单平均，不是复利）`
           : ''
         }
-      </div>
-      ${flowHtml}`;
+      </div>`;
   }
 
   const todayBanner = isTodayRecorded
@@ -178,13 +156,10 @@ export function render(container, ctx) {
   const recentHtml = recent.map((snapshot) => {
     const rowPeriod = calculatePeriod(data, snapshot);
     const rowBreakdown = snapshotBreakdown(snapshot, data.accounts);
-    const rowDelta = rowPeriod?.hasPrevious
-      ? (mode === 'adjusted' ? rowPeriod.adjustedDelta : rowPeriod.rawDelta)
-      : null;
-    const rowRate = rowPeriod?.hasPrevious
-      ? (mode === 'adjusted' ? rowPeriod.adjustedRate : rowPeriod.rawRate)
-      : null;
+    const rowDelta = rowPeriod?.hasPrevious ? rowPeriod.rawDelta : null;
+    const rowRate = rowPeriod?.hasPrevious ? rowPeriod.rawRate : null;
     const rowClass = rowDelta == null ? 'money-flat' : moneyClass(rowDelta);
+    const rateClass = rowRate == null ? 'money-flat' : moneyClass(rowDelta);
     return `
       <button type="button" class="list-row" data-go-history>
         <span class="list-row__main">
@@ -193,7 +168,7 @@ export function render(container, ctx) {
         </span>
         <span class="list-row__value">
           <strong class="${rowClass}">${rowDelta == null ? '—' : formatSignedMoney(rowDelta)}</strong>
-          <span>${rowRate == null ? '基准记录' : formatRate(rowRate)}</span>
+          <span class="${rateClass}">${rowRate == null ? '基准记录' : formatRate(rowRate)}</span>
         </span>
       </button>`;
   }).join('');
@@ -215,13 +190,9 @@ export function render(container, ctx) {
         </p>
       </div>
 
-      <div class="segmented" role="group" aria-label="收益口径">
-        <button type="button" data-mode="adjusted" class="${mode === 'adjusted' ? 'is-active' : ''}">剔除外部收入</button>
-        <button type="button" data-mode="raw" class="${mode === 'raw' ? 'is-active' : ''}">不剔除</button>
-      </div>
-
       <section class="card profit-card">
         ${profitHtml}
+        <p class="tiny" style="margin:2px 0 0">收益 = 本次总资产 − 上次总资产；工资等到账也会计入。</p>
       </section>
 
       ${todayBanner}
@@ -249,21 +220,12 @@ export function render(container, ctx) {
       </p>
     </div>`;
 
-  const chartPoints = sortedSnapshots(data, true)
-    .slice(-30)
-    .map((snapshot) => ({
-      date: snapshot.date,
-      value: snapshotBreakdown(snapshot, data.accounts).net
-    }));
+  const chartPoints = buildChartPoints(
+    data,
+    sortedSnapshots(data, true).slice(-30)
+  );
   renderLineChart(container.querySelector('#home-chart'), chartPoints, {
-    ariaLabel: `${mode === 'adjusted' ? '剔除外部收入口径' : '不剔除口径'}的总资产趋势`
-  });
-
-  container.querySelectorAll('[data-mode]').forEach((button) => {
-    button.addEventListener('click', () => {
-      data.settings.returnMode = button.dataset.mode;
-      if (ctx.save()) ctx.rerender();
-    });
+    ariaLabel: '总资产趋势图'
   });
 
   container.querySelectorAll('[data-go-record]').forEach((button) => {

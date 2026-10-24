@@ -1,9 +1,8 @@
 import {
   accountsInSnapshot,
+  buildChartPoints,
   calculatePeriod,
-  categoryName,
   historyRows,
-  incomeRecordsInRange,
   snapshotBreakdown,
   snapshotMonthlyGroups,
   sortedSnapshots
@@ -21,6 +20,7 @@ import {
   formatSignedMoney,
   kindColor,
   kindLabel,
+  moneyClass,
   openModal,
   toast,
   todayStr,
@@ -29,12 +29,6 @@ import {
 import { resetDraft } from './record.js';
 
 let range = 30;
-
-function moneyClass(value) {
-  if (value > 0) return 'money-up';
-  if (value < 0) return 'money-down';
-  return 'money-flat';
-}
 
 function rangeLabel() {
   return range === 'all' ? '全部记录' : `最近 ${range} 天`;
@@ -48,9 +42,6 @@ function openDetail(ctx, date) {
   const period = calculatePeriod(data, snapshot);
   const breakdown = snapshotBreakdown(snapshot, data.accounts);
   const balances = accountsInSnapshot(snapshot, data);
-  const incomes = period?.previous
-    ? incomeRecordsInRange(data, period.previous.date, snapshot.date)
-    : [];
 
   const balanceRows = balances.map(({ account, cents }) => {
     const isLiability = account.type === 'liability';
@@ -68,25 +59,7 @@ function openDetail(ctx, date) {
           ${metaText ? `<span class="list-row__meta">${metaText}</span>` : ''}
         </span>
         <span class="list-row__value">
-          <strong class="${signed < 0 ? 'money-down' : ''}">${formatMoney(signed)}</strong>
-        </span>
-      </div>`;
-  }).join('');
-
-  const incomeRows = incomes.map((record) => {
-    const category = data.incomeCategories.find((item) => item.id === record.categoryId);
-    const isOut = category?.direction === 'out';
-    const signed = isOut ? -record.amountCents : record.amountCents;
-    return `
-      <div class="list-row list-row--static">
-        <span class="list-row__main">
-          <span class="list-row__title">${escapeHtml(categoryName(data, record.categoryId))}</span>
-          <span class="list-row__meta">${escapeHtml(record.note || '')}${
-            record.countsAsAsset === false ? ' · 未计入资产' : ''
-          }</span>
-        </span>
-        <span class="list-row__value">
-          <strong class="${signed >= 0 ? 'money-up' : 'money-down'}">${formatSignedMoney(signed)}</strong>
+          <strong class="${signed < 0 ? 'money-debt' : ''}">${formatMoney(signed)}</strong>
         </span>
       </div>`;
   }).join('');
@@ -98,39 +71,28 @@ function openDetail(ctx, date) {
         <div class="banner__body">这是第一条基准记录，收益从下一条记录开始计算。</div>
       </div>`;
   } else {
-    const {
-      rawDelta, adjustedDelta, rawRate, adjustedRate,
-      days, dailyAvgRaw, dailyAvgAdjusted, flows, previous, previousBreakdown
-    } = period;
+    const { rawDelta, rawRate, days, dailyAvgRaw, previous, previousBreakdown } = period;
+    const deltaClass = moneyClass(rawDelta);
     const rateNote = previousBreakdown.net <= 0
       ? '<p class="tiny">上期总资产小于等于 0，无法计算收益率。</p>'
       : '';
     const dailyNote = days > 1
-      ? `<p class="tiny">日均约 ${formatSignedMoney(dailyAvgAdjusted)}（剔除口径）/ ${formatSignedMoney(dailyAvgRaw)}（不剔除），简单平均，不是复利。</p>`
+      ? `<p class="tiny">日均约 ${formatSignedMoney(dailyAvgRaw)} / 天，简单平均，不是复利。</p>`
       : '';
-    const flowParts = [];
-    if (flows.incomeIn) flowParts.push(`工资等收入 ${formatMoney(flows.incomeIn)}`);
-    if (flows.externalIn) flowParts.push(`外部转入 ${formatMoney(flows.externalIn)}`);
-    if (flows.externalOut) flowParts.push(`外部转出 ${formatMoney(flows.externalOut)}`);
-    if (flows.ignored) flowParts.push(`未计入资产 ${formatMoney(flows.ignored)}`);
 
     periodHtml = `
       <div class="summary-grid">
         <div class="summary-card">
-          <div class="summary-card__label">不剔除收益</div>
-          <div class="summary-card__value ${moneyClass(rawDelta)}">${formatSignedMoney(rawDelta)}</div>
-          <div class="summary-card__sub">${formatRate(rawRate)}</div>
+          <div class="summary-card__label">收益</div>
+          <div class="summary-card__value ${deltaClass}">${formatSignedMoney(rawDelta)}</div>
+          <div class="summary-card__sub ${deltaClass}">${formatRate(rawRate)}</div>
         </div>
         <div class="summary-card">
-          <div class="summary-card__label">剔除外部收入后</div>
-          <div class="summary-card__value ${moneyClass(adjustedDelta)}">${formatSignedMoney(adjustedDelta)}</div>
-          <div class="summary-card__sub">${formatRate(adjustedRate)}</div>
+          <div class="summary-card__label">区间</div>
+          <div class="summary-card__value" style="font-size:16px">${days} 天</div>
+          <div class="summary-card__sub">较 ${formatDateFull(previous.date)}</div>
         </div>
       </div>
-      <p class="tiny">
-        较 ${formatDateFull(previous.date)} 的记录，共 ${days} 天。
-        ${flowParts.length ? `区间外部资金：${flowParts.join('、')}。` : '区间内没有外部资金流水。'}
-      </p>
       ${rateNote}
       ${dailyNote}`;
   }
@@ -161,11 +123,6 @@ function openDetail(ctx, date) {
         <div class="list">${balanceRows || '<div class="empty">没有账户数据</div>'}</div>
       </div>
 
-      <div class="section">
-        <h3 class="section-title">区间收入</h3>
-        <div class="list">${incomeRows || '<div class="empty">区间内没有收入记录</div>'}</div>
-      </div>
-
       ${noteHtml}
 
       <div class="modal__actions">
@@ -187,7 +144,7 @@ function openDetail(ctx, date) {
       dialog.querySelector('[data-delete]')?.addEventListener('click', async () => {
         const proceed = await confirmDialog({
           title: '删除这一天的记录？',
-          message: '只删除余额记录，收入记录不会删除。删除后收益会按剩下的记录重新计算。',
+          message: '只删除这一天的余额记录。删除后收益会按剩下的记录重新计算。',
           confirmText: '删除',
           danger: true
         });
@@ -213,7 +170,6 @@ export function render(container, ctx) {
   const data = ctx.data;
   const rows = historyRows(data);
   const periodByDate = new Map(rows.map((row) => [row.snapshot.date, row.period]));
-  const mode = data.settings.returnMode === 'raw' ? 'raw' : 'adjusted';
 
   if (!data.snapshots.length) {
     container.innerHTML = `
@@ -239,22 +195,17 @@ export function render(container, ctx) {
   const chartSnapshots = sortedSnapshots(data, true).filter((snapshot) => (
     cutoff ? snapshot.date >= cutoff : true
   ));
-  const chartPoints = chartSnapshots.map((snapshot) => ({
-    date: snapshot.date,
-    value: snapshotBreakdown(snapshot, data.accounts).net
-  }));
+  const chartPoints = buildChartPoints(data, chartSnapshots);
 
   const monthlyGroups = snapshotMonthlyGroups(data);
   const groupsHtml = monthlyGroups.map((group) => {
     const groupRows = group.snapshots.map((snapshot) => {
       const period = periodByDate.get(snapshot.date);
       const breakdown = snapshotBreakdown(snapshot, data.accounts);
-      const delta = period?.hasPrevious
-        ? (mode === 'adjusted' ? period.adjustedDelta : period.rawDelta)
-        : null;
-      const rate = period?.hasPrevious
-        ? (mode === 'adjusted' ? period.adjustedRate : period.rawRate)
-        : null;
+      const delta = period?.hasPrevious ? period.rawDelta : null;
+      const rate = period?.hasPrevious ? period.rawRate : null;
+      const deltaClass = delta == null ? 'money-flat' : moneyClass(delta);
+      const rateClass = rate == null ? 'money-flat' : moneyClass(delta);
       return `
         <button type="button" class="list-row" data-open-date="${snapshot.date}">
           <span class="list-row__main">
@@ -265,10 +216,10 @@ export function render(container, ctx) {
             <span class="list-row__meta">总资产 ${formatMoney(breakdown.net)}</span>
           </span>
           <span class="list-row__value">
-            <strong class="${delta == null ? 'money-flat' : moneyClass(delta)}">
+            <strong class="${deltaClass}">
               ${delta == null ? '基准记录' : formatSignedMoney(delta)}
             </strong>
-            <span>${rate == null ? (delta == null ? '—' : '收益率 —') : formatRate(rate)}</span>
+            <span class="${rateClass}">${rate == null ? (delta == null ? '—' : '收益率 —') : formatRate(rate)}</span>
           </span>
         </button>`;
     }).join('');
@@ -304,11 +255,6 @@ export function render(container, ctx) {
         <div id="history-chart"></div>
       </section>
 
-      <div class="segmented" role="group" aria-label="收益口径">
-        <button type="button" data-mode="adjusted" class="${mode === 'adjusted' ? 'is-active' : ''}">列表显示：剔除外部收入</button>
-        <button type="button" data-mode="raw" class="${mode === 'raw' ? 'is-active' : ''}">不剔除</button>
-      </div>
-
       <section class="card">
         <div class="section-head">
           <h2 class="section-title">每日记录</h2>
@@ -327,13 +273,6 @@ export function render(container, ctx) {
     button.addEventListener('click', () => {
       range = button.dataset.range === 'all' ? 'all' : Number(button.dataset.range);
       ctx.rerender({ keepScroll: true });
-    });
-  });
-
-  container.querySelectorAll('[data-mode]').forEach((button) => {
-    button.addEventListener('click', () => {
-      data.settings.returnMode = button.dataset.mode;
-      if (ctx.save()) ctx.rerender({ keepScroll: true });
     });
   });
 

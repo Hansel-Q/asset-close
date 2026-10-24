@@ -3,7 +3,7 @@
  * 所有 URL 都用相对路径，保证部署在 GitHub Pages 子目录下也能工作。
  */
 
-const CACHE_NAME = 'asset-close-v1.0.0';
+const CACHE_NAME = 'asset-close-v1.1.0';
 
 const ASSETS = [
   './',
@@ -15,9 +15,9 @@ const ASSETS = [
   './js/calc.js',
   './js/utils.js',
   './js/chart.js',
+  './js/backup.js',
   './js/views/home.js',
   './js/views/record.js',
-  './js/views/income.js',
   './js/views/history.js',
   './js/views/settings.js',
   './icons/icon-180.png',

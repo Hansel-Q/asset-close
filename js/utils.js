@@ -3,7 +3,7 @@
  * 这里不依赖任何第三方库，全部用浏览器自带能力。
  */
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -51,23 +51,8 @@ export function addDays(dateStr, n) {
   return todayStr(d);
 }
 
-export function addMonths(monthStr, delta) {
-  const [y, m] = String(monthStr).split('-').map(Number);
-  const d = new Date(y || 1970, (m || 1) - 1 + delta, 1, 12, 0, 0, 0);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
-}
-
-export function currentMonth() {
-  return todayStr().slice(0, 7);
-}
-
 export function monthOf(dateStr) {
   return String(dateStr).slice(0, 7);
-}
-
-export function formatMonthCN(monthStr) {
-  const [y, m] = String(monthStr).split('-');
-  return `${y}年${Number(m)}月`;
 }
 
 export function formatDateCN(dateStr) {
@@ -168,6 +153,13 @@ export function formatMoney(cents, { sign = false, decimals = 2, symbol = true }
 
 export function formatSignedMoney(cents) {
   return formatMoney(cents, { sign: true });
+}
+
+/** 收益/收益率的颜色类：A 股习惯红涨绿跌。 */
+export function moneyClass(value) {
+  if (value > 0) return 'money-up';
+  if (value < 0) return 'money-down';
+  return 'money-flat';
 }
 
 /** 图表坐标轴用的紧凑金额：¥1.2万、¥3.4亿。 */
@@ -286,7 +278,8 @@ export function confirmDialog({
   message = '',
   confirmText = '确定',
   cancelText = '取消',
-  danger = false
+  danger = false,
+  onConfirm = null
 } = {}) {
   return new Promise((resolve) => {
     let settled = false;
@@ -318,6 +311,9 @@ export function confirmDialog({
     dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
       done(true);
       dialog.close();
+      // 关键：onConfirm 在用户点击的同一个同步调用栈里执行，
+      // 让随后的 navigator.share() 仍持有 transient activation。
+      onConfirm?.();
     });
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) dialog.close();
